@@ -14,6 +14,10 @@ class Board:
             return True
         return False
         
+    def reset(self) -> None:
+        self.board.reset()
+        self.move_history.clear()
+
     def undo_move(self) -> Optional[chess.Move]:
         if self.move_history:
             move = self.move_history.pop()
