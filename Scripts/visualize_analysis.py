@@ -1,5 +1,7 @@
 import pandas as pd
 import numpy as np
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import seaborn as sns
 from pathlib import Path
@@ -24,7 +26,7 @@ def load_training_data(file_path='Data/training_data.csv'):
 def plot_opening_distribution(df, top_n=10):
     plt.figure(figsize=(12, 6))
     
-    opening_counts = df['opening'].value_counts().head(top_n)
+    opening_counts = df['opening_name'].value_counts().head(top_n)
     
     sns.barplot(x=opening_counts.values, y=opening_counts.index)
     plt.title(f'Top {top_n} Openings in Training Data')
@@ -38,7 +40,7 @@ def plot_opening_distribution(df, top_n=10):
 def plot_evaluation_distribution(df):
     plt.figure(figsize=(10, 6))
     
-    sns.histplot(data=df, x='evaluation', bins=50)
+    sns.histplot(data=df, x='position_evaluation', bins=50)
     plt.title('Distribution of Position Evaluations')
     plt.xlabel('Evaluation Score')
     plt.ylabel('Count')
@@ -52,7 +54,7 @@ def plot_evaluation_distribution(df):
 def plot_game_outcomes(df):
     plt.figure(figsize=(8, 8))
     
-    outcome_counts = df['result'].value_counts()
+    outcome_counts = df['game_outcome'].value_counts()
     
     plt.pie(outcome_counts.values, labels=outcome_counts.index, autopct='%1.1f%%')
     plt.title('Distribution of Game Outcomes')
@@ -62,20 +64,11 @@ def plot_game_outcomes(df):
     plt.close()
 
 def plot_player_ratings(df):
-    plt.figure(figsize=(12, 5))
-    
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 5))
-    
-    sns.histplot(data=df, x='white_rating', bins=30, ax=ax1) #white player ratings
-    ax1.set_title('Distribution of White Player Ratings')
-    ax1.set_xlabel('Rating')
-    ax1.set_ylabel('Count')
-    
-    sns.histplot(data=df, x='black_rating', bins=30, ax=ax2) #black player ratings
-    ax2.set_title('Distribution of Black Player Ratings')
-    ax2.set_xlabel('Rating')
-    ax2.set_ylabel('Count')
-    
+    plt.figure(figsize=(10, 5))
+    sns.histplot(data=df, x='player_rating', bins=30)
+    plt.title('Distribution of Player Ratings')
+    plt.xlabel('Rating')
+    plt.ylabel('Count')
     plt.tight_layout()
     plt.savefig('Data/plots/player_ratings.png')
     plt.close()
@@ -92,10 +85,10 @@ def plot_engine_comparison(df, num_positions=100):
     training_evals = []
     
     for _, row in sample_positions.iterrows():
-        board = chess.Board(row['fen'])
+        board = chess.Board(row['position_fen'])
         original_evals.append(original_engine.evaluate_position(board))
         enhanced_evals.append(enhanced_engine.evaluate_position(board))
-        training_evals.append(row['evaluation'])
+        training_evals.append(row['position_evaluation'])
     
     plt.figure(figsize=(10, 10))
     

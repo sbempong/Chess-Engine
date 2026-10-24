@@ -1,5 +1,7 @@
 import pandas as pd
 import numpy as np
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import seaborn as sns
 import chess
@@ -32,7 +34,7 @@ def analyze_openings(data):
     plt.xlabel('Opening')
     plt.ylabel('Count')
     plt.tight_layout()
-    plt.savefig('Data/opening_distribution.png')
+    plt.savefig('Data/plots/opening_distribution.png')
     plt.close()
     
     print("\nTop 5 openings:")
@@ -50,7 +52,7 @@ def analyze_evaluations(data):
     plt.xlabel('Evaluation')
     plt.ylabel('Count')
     plt.tight_layout()
-    plt.savefig('Data/evaluation_distribution.png')
+    plt.savefig('Data/plots/evaluation_distribution.png')
     plt.close()
     
     # Calculate statistics
@@ -72,7 +74,7 @@ def analyze_game_outcomes(data):
     plt.pie(outcome_counts, labels=outcome_counts.index, autopct='%1.1f%%')
     plt.title('Distribution of Game Outcomes')
     plt.tight_layout()
-    plt.savefig('Data/outcome_distribution.png')
+    plt.savefig('Data/plots/outcome_distribution.png')
     plt.close()
     
     print("\nGame Outcome Distribution:")
@@ -90,7 +92,7 @@ def analyze_player_ratings(data):
     plt.xlabel('Rating')
     plt.ylabel('Count')
     plt.tight_layout()
-    plt.savefig('Data/rating_distribution.png')
+    plt.savefig('Data/plots/rating_distribution.png')
     plt.close()
     
     print("\nPlayer Rating Statistics:")
@@ -132,10 +134,11 @@ def compare_engine_with_training_data(data):
     plt.xlabel('Training Evaluation')
     plt.ylabel('Engine Evaluation')
     plt.tight_layout()
-    plt.savefig('Data/evaluation_correlation.png')
+    plt.savefig('Data/plots/evaluation_correlation.png')
     plt.close()
 
 def main():
+    os.makedirs('Data/plots', exist_ok=True)
     print("Analyzing chess training data...")
     
     # Load the data
