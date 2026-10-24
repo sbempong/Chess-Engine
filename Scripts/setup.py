@@ -1,4 +1,3 @@
-import os
 import sys
 import subprocess
 import platform
@@ -31,7 +30,7 @@ def create_virtual_env():
 
 def install_dependencies():
     print("Installing dependencies...")
-    subprocess.run([sys.executable, "-m", "pip", "install", "-r", "requirements.txt"])
+    subprocess.run([sys.executable, "-m", "pip", "install", "-r", "requirements-dev.txt"])
 
 def check_stockfish():
     try:
@@ -39,7 +38,7 @@ def check_stockfish():
         engine = chess.engine.SimpleEngine.popen_uci("stockfish")
         engine.quit()
         print("Stockfish is properly installed and accessible")
-    except Exception as e:
+    except Exception:
         print("Warning: Stockfish not found or not accessible")
         print("Please install Stockfish:")
         if platform.system() == "Darwin":  # macOS
@@ -61,7 +60,7 @@ def main():
     print("\nNext steps:")
     print("1. Activate the virtual environment")
     print("2. Run the chess engine: python main.py")
-    print("3. Or start the API server: python API/server.py")
+    print("3. Or start the API server: uvicorn API.server:app --reload")
 
 if __name__ == "__main__":
     main()

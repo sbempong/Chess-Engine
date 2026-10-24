@@ -6,10 +6,11 @@ from pathlib import Path
 import chess
 import sys
 import os
-from Engine.chess_suggester import ChessSuggester
-from Engine.enhanced_engine import EnhancedChessSuggester
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from Engine.chess_suggester import ChessSuggester  # noqa: E402
+from Engine.enhanced_engine import EnhancedChessSuggester  # noqa: E402
 
 def load_training_data(file_path='Data/training_data.csv'):
     try:

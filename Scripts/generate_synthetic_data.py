@@ -1,8 +1,6 @@
 import chess
 import random
 import csv
-from datetime import datetime
-import numpy as np
 
 def generate_synthetic_game():
     board = chess.Board()

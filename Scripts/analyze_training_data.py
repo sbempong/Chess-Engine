@@ -2,14 +2,13 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-from collections import Counter
 import chess
 import sys
 import os
-from Engine.chess_suggester import ChessSuggester
-from Engine.evaluation import evaluate_position
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from Engine.evaluation import evaluate_position  # noqa: E402
 
 def load_training_data(file_path='Data/training_data.csv'):
     try:

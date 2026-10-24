@@ -77,8 +77,3 @@ class Board:
     def get_square_color(self, square: int) -> Optional[bool]:
         piece = self.get_piece_at(square)
         return piece.color if piece else None
-    
-    def reset(self):
-        """Reset the board to the starting position."""
-        self.board = chess.Board()
-        self.move_history = [] 
