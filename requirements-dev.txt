@@ -1,0 +1,22 @@
+# Desktop UIs, REST API, ML training pipeline and tests.
+-r requirements.txt
+
+# Desktop (main.py pygame UI, UI/gui.py Tkinter UI)
+pygame>=2.6.0          # 2.6+ required for Python 3.13 wheels
+pillow>=10.0.0
+
+# Enhanced engine model + training scripts
+numpy>=1.26.0
+scikit-learn>=1.3.0
+pandas>=2.0.0
+matplotlib>=3.7.0
+seaborn>=0.12.0
+
+# FastAPI service (API/)
+fastapi>=0.104.0
+uvicorn>=0.24.0
+httpx>=0.25.0          # fastapi.testclient
+
+# Tooling
+pytest>=7.4.0
+pyflakes>=3.0.0

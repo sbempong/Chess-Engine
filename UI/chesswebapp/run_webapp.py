@@ -36,21 +36,12 @@ def main():
     
     print("All required files found")
     
-    # Check if Flask is installed
-    try:
-        import flask
-        print("Flask is installed")
-    except ImportError:
-        print("Flask is not installed. Please run: pip install Flask")
-        return 1
-    
-    # Check if python-chess is installed
-    try:
-        import chess
-        print("python-chess is installed")
-    except ImportError:
-        print("python-chess is not installed. Please run: pip install python-chess")
-        return 1
+    import importlib.util
+    for module, package in (("flask", "Flask"), ("chess", "chess")):
+        if importlib.util.find_spec(module) is None:
+            print(f"{package} is not installed. Please run: pip install -r requirements.txt")
+            return 1
+    print("Flask and chess are installed")
     
     print("\nStarting the chess webapp...")
     print("The webapp will be available at: http://localhost:5001")
