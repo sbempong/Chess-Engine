@@ -86,9 +86,11 @@ def load_model(file_path='Data/trained_model.pkl'):
         return None
 
 class EnhancedChessSuggester(ChessSuggester):
-    
-    def __init__(self, model_path='Data/trained_model.pkl'):
-        super().__init__()
+
+    suggestion_comment = "Enhanced evaluation"
+
+    def __init__(self, model_path='Data/trained_model.pkl', search_depth=2):
+        super().__init__(search_depth=search_depth)
         self.model = load_model(model_path)
         self.use_model = self.model is not None
     
@@ -112,42 +114,6 @@ class EnhancedChessSuggester(ChessSuggester):
             # Fall back to the original evaluation
             return super().evaluate_position(board)
     
-    def suggest_moves(self, board):
-        if board.is_game_over():
-            return []
-        
-        moves = []
-        for move in board.legal_moves:
-            board.push(move)
-            eval_score = -self.evaluate_position(board)
-            board.pop()
-            moves.append((move, eval_score, "Enhanced evaluation"))
-        
-        moves.sort(key=lambda x: x[1], reverse=True)
-        return moves[:5]
-    
-    def get_move_suggestions(self, board):
-        current_eval = self.evaluate_position(board)
-        move_suggestions = self.suggest_moves(board)
-        
-        formatted_suggestions = []
-        for move, eval_score, comment in move_suggestions:
-            formatted_suggestions.append({
-                "move": move.uci(),
-                "san": board.san(move),
-                "evaluation": eval_score,
-                "comment": comment
-            })
-        
-        return {
-            "current_evaluation": current_eval,
-            "is_check": board.is_check(),
-            "is_checkmate": board.is_checkmate(),
-            "is_stalemate": board.is_stalemate(),
-            "is_insufficient_material": board.is_insufficient_material(),
-            "suggested_moves": formatted_suggestions
-        }
-
 if __name__ == "__main__":
     # Example usage
     board = chess.Board()
