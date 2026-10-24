@@ -372,9 +372,9 @@ h3 {
 
 .eval-bar {
     width: 100%;
-    height: 8px;
-    background: rgba(33, 33, 33, 0.08);
-    border-radius: 4px;
+    height: 10px;
+    background: #2b2b2b;
+    border-radius: 5px;
     overflow: hidden;
     margin-bottom: 0.5rem;
 }
@@ -382,17 +382,8 @@ h3 {
 .eval-bar-fill {
     height: 100%;
     width: 50%;
-    background: rgba(33, 33, 33, 0.2);
+    background: #f4f1ea;
     transition: width 0.3s ease;
-    border-radius: 4px;
-}
-
-.eval-bar-fill.positive {
-    background: var(--accent-blue);
-}
-
-.eval-bar-fill.negative {
-    background: rgba(200, 100, 80, 0.5);
 }
 
 .evaluation-text {
@@ -746,38 +737,41 @@ h3 {
 }
 
 .square-55d63 {
-    transition: all 0.2s ease;
     position: relative;
 }
 
-.square-55d63:hover {
-    filter: brightness(1.03);
-}
-
-/* Smooth piece movement transitions */
 .square-55d63 img {
-    width: 100% !important;
-    height: 100% !important;
-    object-fit: contain;
     pointer-events: none;
     user-select: none;
     -webkit-user-drag: none;
-    transition: transform 0.15s ease-out, opacity 0.15s ease-out;
 }
 
-/* Smooth drag and drop */
-.white-1e1d7, .black-3c85d {
-    transition: transform 0.1s ease-out;
+/* Legal-move hints (applied by app.js on drag start) */
+.square-55d63.highlight-source {
+    box-shadow: inset 0 0 0 3px rgba(155, 218, 254, 0.9);
 }
 
-/* Highlight valid moves with smooth animation */
-circle {
-    transition: opacity 0.2s ease-in-out;
-    opacity: 0.6;
+.square-55d63.highlight-move::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 28%;
+    height: 28%;
+    border-radius: 50%;
+    background: rgba(33, 33, 33, 0.25);
+    transform: translate(-50%, -50%);
+    pointer-events: none;
 }
 
-circle:hover {
-    opacity: 0.8;
+.square-55d63.highlight-capture::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border: 5px solid rgba(200, 100, 80, 0.55);
+    border-radius: 50%;
+    box-sizing: border-box;
+    pointer-events: none;
 }
 
 .highlight1-32417 {
