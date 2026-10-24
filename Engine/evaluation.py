@@ -1,7 +1,10 @@
+import atexit
+import os
+import shutil
+from typing import Optional, Tuple
+
 import chess
 import chess.engine
-from typing import Optional, Tuple
-import os
 
 # Piece values in centipawns
 PIECE_VALUES = {
@@ -13,100 +16,150 @@ PIECE_VALUES = {
     chess.KING: 20000
 }
 
+MATE_SCORE = 20000
+
+STOCKFISH_CANDIDATES = (
+    "/opt/homebrew/bin/stockfish",   # macOS, Apple Silicon Homebrew
+    "/usr/local/bin/stockfish",      # macOS, Intel Homebrew
+    "/usr/games/stockfish",          # Debian/Ubuntu
+    "/usr/bin/stockfish",
+    "./stockfish",
+    "./stockfish.exe",
+)
+
+
+def find_stockfish() -> Optional[str]:
+    """Return a path to a Stockfish binary, or None if none can be found.
+
+    Checks the STOCKFISH_PATH environment variable, then PATH, then a few
+    well-known install locations.
+    """
+    env_path = os.environ.get("STOCKFISH_PATH")
+    if env_path and os.path.isfile(env_path):
+        return env_path
+    on_path = shutil.which("stockfish")
+    if on_path:
+        return on_path
+    for candidate in STOCKFISH_CANDIDATES:
+        if os.path.isfile(candidate):
+            return candidate
+    return None
+
+
 class PositionEvaluator:
-    def __init__(self):
-        self.engine = None
-        self.initialize_engine()
-        
-    def initialize_engine(self):
+    """Evaluates positions with Stockfish when available, otherwise by material.
+
+    All scores are in pawns from White's perspective: positive favours White,
+    negative favours Black, regardless of who is to move.
+    """
+
+    def __init__(self, stockfish_path: Optional[str] = None, use_stockfish: bool = True):
+        self.engine: Optional[chess.engine.SimpleEngine] = None
+        self._path = stockfish_path
+        self._use_stockfish = use_stockfish
+        self._started = False
+
+    def _ensure_engine(self) -> Optional[chess.engine.SimpleEngine]:
+        if self._started or not self._use_stockfish:
+            return self.engine
+        self._started = True
+        path = self._path or find_stockfish()
+        if path is None:
+            return None
         try:
-            # Try to find Stockfish in common locations
-            stockfish_paths = [
-                "/usr/games/stockfish",  # Linux
-                "/usr/local/bin/stockfish",  # macOS with Homebrew
-                "stockfish.exe",  # Windows
-                "./stockfish"  # Local directory
-            ]
-            
-            for path in stockfish_paths:
-                if os.path.exists(path):
-                    self.engine = chess.engine.SimpleEngine.popen_uci(path)
-                    return
-                    
-            print("Warning: Stockfish not found. Using simple evaluation.")
-        except Exception as e:
-            print(f"Warning: Could not initialize Stockfish: {e}")
-            print("Using simple evaluation instead.")
-            
+            self.engine = chess.engine.SimpleEngine.popen_uci(path)
+            atexit.register(self.close)
+        except (OSError, chess.engine.EngineError) as exc:
+            print(f"Warning: could not start Stockfish at {path}: {exc}. Using material evaluation.")
+            self.engine = None
+        return self.engine
+
+    @property
+    def has_stockfish(self) -> bool:
+        return self._ensure_engine() is not None
+
     def material_evaluation(self, board: chess.Board) -> float:
         if board.is_checkmate():
-            return -20000 if board.turn else 20000
-            
+            return -MATE_SCORE / 100.0 if board.turn else MATE_SCORE / 100.0
+        if board.is_game_over():
+            return 0.0
+
         score = 0
-        for square in chess.SQUARES:
-            piece = board.piece_at(square)
-            if piece is not None:
-                value = PIECE_VALUES[piece.piece_type]
-                score += value if piece.color else -value
-                
-        return score / 100.0  # Convert centipawns to pawns
-        
+        for piece_type, value in PIECE_VALUES.items():
+            score += value * len(board.pieces(piece_type, chess.WHITE))
+            score -= value * len(board.pieces(piece_type, chess.BLACK))
+        return score / 100.0
+
     def evaluate_position(self, board: chess.Board, depth: int = 15) -> float:
-        if self.engine is not None:
-            try:
-                result = self.engine.analyse(board, chess.engine.Limit(depth=depth))
-                score_obj = result.get("score")
-                if score_obj is not None:
-                    score_value = score_obj.relative.score()
-                    if score_value is not None:
-                        return score_value / 100.0
-                    else:
-                        print("Warning: score_obj.relative.score() is None, using material evaluation.")
-                        return self.material_evaluation(board)
-                else:
-                    print("Warning: No score in engine result, using material evaluation.")
-                    return self.material_evaluation(board)
-            except Exception as e:
-                print(f"Warning: Stockfish evaluation failed: {e}")
-                return self.material_evaluation(board)
-        else:
+        engine = self._ensure_engine()
+        if engine is None:
             return self.material_evaluation(board)
-            
+        try:
+            info = engine.analyse(board, chess.engine.Limit(depth=depth))
+            score = info.get("score")
+            if score is None:
+                return self.material_evaluation(board)
+            return score.white().score(mate_score=MATE_SCORE) / 100.0
+        except chess.engine.EngineError as exc:
+            print(f"Warning: Stockfish evaluation failed: {exc}")
+            return self.material_evaluation(board)
+
     def get_best_move(self, board: chess.Board, depth: int = 15) -> Tuple[Optional[chess.Move], float]:
-        if self.engine is not None:
-            try:
-                result = self.engine.play(board, chess.engine.Limit(depth=depth))
-                return result.move, self.evaluate_position(board, depth)
-            except Exception as e:
-                print(f"Warning: Stockfish analysis failed: {e}")
-                return self.get_simple_best_move(board)
-        else:
+        if board.is_game_over():
+            return None, self.material_evaluation(board)
+        engine = self._ensure_engine()
+        if engine is None:
             return self.get_simple_best_move(board)
-            
+        try:
+            info = engine.analyse(board, chess.engine.Limit(depth=depth))
+            pv = info.get("pv")
+            score = info.get("score")
+            if not pv or score is None:
+                return self.get_simple_best_move(board)
+            return pv[0], score.white().score(mate_score=MATE_SCORE) / 100.0
+        except chess.engine.EngineError as exc:
+            print(f"Warning: Stockfish analysis failed: {exc}")
+            return self.get_simple_best_move(board)
+
     def get_simple_best_move(self, board: chess.Board) -> Tuple[Optional[chess.Move], float]:
+        """One-ply material search. Returns (move, White-perspective score)."""
         best_move = None
-        best_score = float('-inf')
-        
+        best_score = None
+        prefer_higher = board.turn == chess.WHITE
+
         for move in board.legal_moves:
             board.push(move)
-            score = -self.material_evaluation(board)  # Negate because of evaluation from opponent's perspective
+            score = self.material_evaluation(board)
             board.pop()
-            
-            if score > best_score:
+            if best_score is None or (score > best_score if prefer_higher else score < best_score):
                 best_score = score
                 best_move = move
-                
-        return best_move, -best_score  # Negate again to get score from current player's perspective
-        
-    def __del__(self):
-        if self.engine is not None:
-            self.engine.quit()
 
-# Global evaluator instance
-evaluator = PositionEvaluator()
+        return best_move, (best_score if best_score is not None else self.material_evaluation(board))
+
+    def close(self) -> None:
+        if self.engine is not None:
+            try:
+                self.engine.quit()
+            except chess.engine.EngineError:
+                pass
+            self.engine = None
+
+
+_evaluator: Optional[PositionEvaluator] = None
+
+
+def get_evaluator() -> PositionEvaluator:
+    """Shared evaluator, created on first use rather than at import time."""
+    global _evaluator
+    if _evaluator is None:
+        _evaluator = PositionEvaluator()
+    return _evaluator
+
 
 def evaluate_position(board: chess.Board, depth: int = 15) -> float:
-    return evaluator.evaluate_position(board, depth)
+    return get_evaluator().evaluate_position(board, depth)
+
 
 def get_best_move(board: chess.Board, depth: int = 15) -> Tuple[Optional[chess.Move], float]:
-    return evaluator.get_best_move(board, depth) 
+    return get_evaluator().get_best_move(board, depth)
