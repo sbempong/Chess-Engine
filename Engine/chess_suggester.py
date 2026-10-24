@@ -1,15 +1,20 @@
 import chess
 
+from Engine.piece_square_tables import positional_score
+
 
 class ChessSuggester:
-    """Material-based move suggester.
+    """Material + piece-square-table move suggester.
 
-    All evaluations are from White's perspective: positive favours White,
-    negative favours Black. Move ranking takes the side to move into account,
-    so the best move for the mover is always first regardless of colour.
+    All evaluations are from White's perspective in pawns: positive favours
+    White, negative favours Black. Move ranking takes the side to move into
+    account, so the best move for the mover is always first regardless of
+    colour. The positional term is small (tens of centipawns per piece) so
+    material always dominates; it exists to break ties between quiet moves.
     """
 
     suggestion_comment = "Heuristic evaluation"
+    positional_weight = 1.0  # multiplier on the piece-square-table term
 
     def __init__(self, search_depth=2):
         self.search_depth = search_depth
@@ -28,16 +33,13 @@ class ChessSuggester:
                 return -10000.0 if board.turn else 10000.0
             return 0.0
 
+        return self.material_score(board) + self.positional_weight * positional_score(board) / 100.0
+
+    def material_score(self, board):
         score = 0.0
-        for square in chess.SQUARES:
-            piece = board.piece_at(square)
-            if piece is None:
-                continue
-            value = self.material_values[piece.piece_type]
-            if piece.color:
-                score += value
-            else:
-                score -= value
+        for piece_type, value in self.material_values.items():
+            score += value * len(board.pieces(piece_type, chess.WHITE))
+            score -= value * len(board.pieces(piece_type, chess.BLACK))
         return score
 
     def evaluate_positions(self, boards):

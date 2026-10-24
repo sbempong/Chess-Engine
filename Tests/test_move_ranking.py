@@ -67,3 +67,25 @@ def test_no_suggestions_when_game_over(suggester):
     board = chess.Board("rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 1 3")
     assert board.is_checkmate()
     assert suggester.suggest_moves(board) == []
+
+
+def test_start_position_prefers_central_development():
+    top = [m.uci() for m, _, _ in ChessSuggester().suggest_moves(chess.Board())]
+    assert set(top[:4]) == {"e2e4", "d2d4", "g1f3", "b1c3"}
+    assert not {"a2a3", "h2h3", "g1h3", "b1a3"} & set(top)
+
+
+def test_black_prefers_central_development_too():
+    board = chess.Board()
+    board.push_san("e4")
+    top = [m.uci() for m, _, _ in ChessSuggester().suggest_moves(board)]
+    # d5 is excluded at 2 ply: exd5 wins a pawn and the recapture is beyond the horizon.
+    assert set(top[:3]) == {"e7e5", "g8f6", "b8c6"}
+
+
+def test_positional_term_never_outweighs_a_pawn_capture():
+    # White can win a pawn with Nxe5 or make the "pretty" developing move Bc4.
+    board = chess.Board("r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3")
+    board.remove_piece_at(chess.C6)  # knight gone: e5 pawn is now undefended
+    best = ChessSuggester().suggest_moves(board)[0][0]
+    assert best.uci() == "f3e5"
