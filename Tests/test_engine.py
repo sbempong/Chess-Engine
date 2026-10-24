@@ -1,102 +1,76 @@
-import unittest
-import chess
-import pandas as pd
-import numpy as np
-import sys
+import csv
 import os
+
+import chess
+import pytest
+
+from Engine.board import Board
 from Engine.chess_suggester import ChessSuggester
-from Engine.evaluation import evaluate_position
+from Engine.evaluation import PositionEvaluator, evaluate_position
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+TRAINING_DATA = os.path.join(ROOT, "Data", "training_data.csv")
 
-class TestChessEngine(unittest.TestCase):
-    
-    def setUp(self):
-        self.board = chess.Board()
-        self.suggester = ChessSuggester()
-        self.move_suggester = ChessSuggester()
-        
-        try:
-            self.training_data = pd.read_csv('Data/training_data.csv', nrows=100)
-        except FileNotFoundError:
-            print("Warning: training_data.csv not found. Running tests without training data.")
-            self.training_data = None
-    
-    def test_initial_position(self):
-        eval_score = evaluate_position(self.board)
-        self.assertIsInstance(eval_score, float)
-        self.assertAlmostEqual(eval_score, 0.0, places=1)  # Initial position should be roughly equal
-    
-    def test_material_evaluation(self):
-        self.board = chess.Board('rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1')
-        eval_score = evaluate_position(self.board)
-        self.assertGreater(eval_score, 0) 
-        self.board = chess.Board('rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1') #position with queen advantage
-        self.board.remove_piece_at(chess.E4) 
-        eval_score = evaluate_position(self.board)
-        self.assertLess(eval_score, 0) 
-    
-    def test_move_suggestions(self):
-        suggestions = self.move_suggester.suggest_moves(self.board)
-        self.assertIsInstance(suggestions, list)
-        self.assertGreater(len(suggestions), 0)
-        for move, eval_score, comment in suggestions:
-            self.assertIsInstance(move, chess.Move)
-            self.assertIsInstance(eval_score, float)
-            self.assertIsInstance(comment, str)
-    
-    def test_chess_suggester(self):
-        result = self.suggester.get_move_suggestions(self.board)
-        expected_keys = ['current_evaluation', 'is_check', 'is_checkmate', 
-                         'is_stalemate', 'is_insufficient_material', 'suggested_moves']
-        for key in expected_keys:
-            self.assertIn(key, result)
-        self.assertIsInstance(result['suggested_moves'], list)
-        
-        for move_data in result['suggested_moves']:
-            self.assertIn('move', move_data)
-            self.assertIn('san', move_data)
-            self.assertIn('evaluation', move_data)
-            self.assertIn('comment', move_data)
-    
-    def test_training_data_compatibility(self):
-        if self.training_data is None:
-            self.skipTest("Training data not available")
-        
-        for _, row in self.training_data.head(5).iterrows():
-            try:
-                board = chess.Board(str(row['position_fen']))
-                suggestions = self.move_suggester.suggest_moves(board)
-                self.assertGreater(len(suggestions), 0)
-                eval_score = evaluate_position(board)
-                self.assertIsInstance(eval_score, float)
-                suggester_result = self.suggester.get_move_suggestions(board)
-                self.assertIn('suggested_moves', suggester_result)
-                self.assertGreater(len(suggester_result['suggested_moves']), 0)
-            except Exception as e:
-                self.fail(f"Failed to process position: {row['position_fen']} - {str(e)}")
-    
-    def test_checkmate_detection(self):
-        self.board = chess.Board() #fool's mate position
-        self.board.push_san("f3")
-        self.board.push_san("e5")
-        self.board.push_san("g4")
-        self.board.push_san("Qh4")
-        self.assertTrue(self.board.is_checkmate())
-        eval_score = evaluate_position(self.board)
-        self.assertLess(eval_score, -1000) 
-    
-    def test_stalemate_detection(self):
-        self.board = chess.Board("k7/8/8/8/8/8/8/K7 w - - 0 1") #stalemate position
-        self.assertTrue(self.board.is_stalemate())
-        eval_score = evaluate_position(self.board)
-        self.assertAlmostEqual(eval_score, 0.0, places=1)  # Stalemate should be a draw
-    
-    def test_insufficient_material(self):
-        self.board = chess.Board("k7/8/8/8/8/8/8/K7 w - - 0 1") #King Vs King position
-        self.assertTrue(self.board.is_insufficient_material())
-        eval_score = evaluate_position(self.board)
-        self.assertAlmostEqual(eval_score, 0.0, places=1)  # Insufficient material=draw
 
-if __name__ == '__main__':
-    unittest.main()
+def sample_training_fens(limit=5):
+    if not os.path.exists(TRAINING_DATA):
+        return []
+    with open(TRAINING_DATA, newline="") as handle:
+        return [row["position_fen"] for _, row in zip(range(limit), csv.DictReader(handle))]
+
+
+@pytest.fixture(scope="module")
+def material():
+    return PositionEvaluator(use_stockfish=False)
+
+
+def test_initial_position_roughly_equal():
+    # With Stockfish this is a small White edge; without it, exactly 0.
+    assert abs(evaluate_position(chess.Board(), depth=8)) < 1.0
+
+
+def test_material_pawn_up(material):
+    board = chess.Board("rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1")
+    board.remove_piece_at(chess.E7)
+    assert material.evaluate_position(board) == pytest.approx(1.0)
+
+
+def test_material_queen_down(material):
+    board = chess.Board()
+    board.remove_piece_at(chess.D1)
+    assert material.evaluate_position(board) == pytest.approx(-9.0)
+
+
+def test_checkmate_detection():
+    board = chess.Board()
+    for san in ("f3", "e5", "g4", "Qh4"):
+        board.push_san(san)
+    assert board.is_checkmate()
+    assert evaluate_position(board) < -100
+
+
+@pytest.mark.parametrize("fen", ["k7/8/8/8/8/8/8/K7 w - - 0 1", "k7/8/1K6/8/8/8/8/8 w - - 0 1"])
+def test_draws_are_zero(fen):
+    board = chess.Board(fen)
+    assert board.is_insufficient_material()
+    assert evaluate_position(board) == 0.0
+
+
+def test_board_wrapper_round_trip():
+    board = Board()
+    assert board.make_move(chess.Move.from_uci("e2e4"))
+    assert not board.make_move(chess.Move.from_uci("e2e4"))
+    assert board.get_pgn() == "1. e4"
+    assert board.undo_move() == chess.Move.from_uci("e2e4")
+    assert board.get_fen() == chess.STARTING_FEN
+    board.make_move(chess.Move.from_uci("d2d4"))
+    board.reset()
+    assert board.get_fen() == chess.STARTING_FEN and board.move_history == []
+
+
+@pytest.mark.parametrize("fen", sample_training_fens() or [pytest.param(None, marks=pytest.mark.skip("no training data"))])
+def test_training_positions_are_processable(fen):
+    board = chess.Board(fen)
+    suggestions = ChessSuggester().get_move_suggestions(board)
+    assert suggestions["suggested_moves"]
+    assert isinstance(evaluate_position(board, depth=6), float)

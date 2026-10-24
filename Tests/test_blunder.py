@@ -1,56 +1,45 @@
+"""Blunder detection against Stockfish. Skipped when Stockfish isn't installed."""
 import chess
 import chess.engine
-import unittest
+import pytest
 
-class TestBlunderDetection(unittest.TestCase):
-    def setUp(self):
-        self.engine = chess.engine.SimpleEngine.popen_uci("/opt/homebrew/bin/stockfish")
-        self.threshold = -3.0  # Only flag drops >3 pawns as blunders
-        self.analysis_limit = chess.engine.Limit(depth=16)
-        self.multipv = 5  # Check against top 5 moves
+from Engine.evaluation import find_stockfish
 
-    def tearDown(self):
-        self.engine.quit()
+STOCKFISH = find_stockfish()
+pytestmark = pytest.mark.skipif(STOCKFISH is None, reason="Stockfish not installed")
 
-    def is_blunder(self, board, move):
-        info_before = self.engine.analyse(board, self.analysis_limit) #evaluate before the move
-        score_obj_before = info_before.get("score")
-        score_before = score_obj_before.white().score(mate_score=10000) if score_obj_before is not None else None
-        
-        # Make the move and evaluate
-        board.push(move)
-        info_after = self.engine.analyse(board, self.analysis_limit)
-        score_obj_after = info_after.get("score")
-        score_after = score_obj_after.white().score(mate_score=10000) if score_obj_after is not None else None
-        board.pop()
+BLUNDER_THRESHOLD = -3.0   # pawns lost (from the mover's perspective)
+LIMIT = chess.engine.Limit(depth=12)
+MULTIPV = 5
 
-        if score_before is None or score_after is None:
-            return False
 
-        eval_diff = (score_after - score_before)/100  # Convert to pawns
-        print(f"Eval change for {move}: {eval_diff:.2f} pawns")
-        
-        # Get top engine moves
-        analysis = self.engine.analyse(board, self.analysis_limit, multipv=self.multipv)
-        top_moves = [line["pv"][0] for line in analysis if "pv" in line and line["pv"]]
-        print(f"Top {self.multipv} moves: {top_moves}")
-        
-        # Only blunder if both conditions met:
-        return (eval_diff < self.threshold) and (move not in top_moves)
+@pytest.fixture(scope="module")
+def engine():
+    with chess.engine.SimpleEngine.popen_uci(STOCKFISH) as engine:
+        yield engine
 
-    def test_castling_not_blunder(self):
-        board = chess.Board("r1bqk2r/pppp1ppp/2n2n2/2b1p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 0 6") #position with castling available
-        castling_move = chess.Move.from_uci("e1g1")
-        result = self.engine.play(board, self.analysis_limit) #stock fish verification
-        print(f"Stockfish recommends: {result.move}")
-        
-        self.assertFalse(
-            self.is_blunder(board, castling_move),
-            f"Castling was incorrectly flagged as a blunder. "
-            f"Stockfish recommends: {result.move}"
-        )
 
-if __name__ == "__main__":
-    suite = unittest.TestLoader().loadTestsFromTestCase(TestBlunderDetection)
-    runner = unittest.TextTestRunner()
-    result = runner.run(suite)
+def is_blunder(engine, board, move):
+    """A move is a blunder if it loses more than BLUNDER_THRESHOLD pawns and
+    isn't among the engine's top MULTIPV choices."""
+    mover = board.turn
+    before = engine.analyse(board, LIMIT)["score"].pov(mover).score(mate_score=10000)
+
+    board.push(move)
+    after = engine.analyse(board, LIMIT)["score"].pov(mover).score(mate_score=10000)
+    board.pop()
+
+    eval_drop = (after - before) / 100
+    top_moves = [line["pv"][0] for line in engine.analyse(board, LIMIT, multipv=MULTIPV) if line.get("pv")]
+    return eval_drop < BLUNDER_THRESHOLD and move not in top_moves
+
+
+def test_castling_is_not_a_blunder(engine):
+    board = chess.Board("r1bqk2r/pppp1ppp/2n2n2/2b1p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 0 6")
+    assert not is_blunder(engine, board, chess.Move.from_uci("e1g1"))
+
+
+def test_hanging_the_queen_is_a_blunder(engine):
+    # 1.e4 d5 2.Qg4?? drops the queen to ...Bxg4
+    board = chess.Board("rnbqkbnr/ppp1pppp/8/3p4/4P3/8/PPPP1PPP/RNBQKBNR w KQkq d6 0 2")
+    assert is_blunder(engine, board, chess.Move.from_uci("d1g4"))

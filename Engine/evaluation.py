@@ -1,6 +1,7 @@
 import atexit
 import os
 import shutil
+import threading
 from typing import Optional, Tuple
 
 import chess
@@ -46,6 +47,21 @@ def find_stockfish() -> Optional[str]:
     return None
 
 
+def _register_shutdown(callback) -> None:
+    """Run `callback` at interpreter exit, *before* non-daemon threads are joined.
+
+    SimpleEngine runs its event loop on a non-daemon thread, and regular
+    atexit hooks only fire after Python has finished joining such threads, so
+    using atexit alone deadlocks on exit. threading._register_atexit is the
+    hook concurrent.futures uses for exactly this situation.
+    """
+    register = getattr(threading, "_register_atexit", None)
+    if register is not None:
+        register(callback)
+    else:  # pragma: no cover - Python < 3.9
+        atexit.register(callback)
+
+
 class PositionEvaluator:
     """Evaluates positions with Stockfish when available, otherwise by material.
 
@@ -68,7 +84,7 @@ class PositionEvaluator:
             return None
         try:
             self.engine = chess.engine.SimpleEngine.popen_uci(path)
-            atexit.register(self.close)
+            _register_shutdown(self.close)
         except (OSError, chess.engine.EngineError) as exc:
             print(f"Warning: could not start Stockfish at {path}: {exc}. Using material evaluation.")
             self.engine = None

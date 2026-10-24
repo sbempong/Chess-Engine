@@ -1,63 +1,45 @@
-import sys
-import os
+"""End-to-end smoke test of the analysis pipeline used by main.py and app.py."""
 import chess
-from Engine.enhanced_engine import EnhancedChessSuggester
+import pytest
+
 from Engine.chess_suggester import ChessSuggester
+from Engine.enhanced_engine import EnhancedChessSuggester
 
-sys.path.append(os.path.join(os.path.dirname(__file__), 'Engine'))
+CHECKMATE = "rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 1 3"
+STALEMATE = "k7/2K5/1Q6/8/8/8/8/8 b - - 0 1"
 
-def test_analysis_integration():
-    print("Testing Chess Analysis Integration...")
-    print("=" * 50)
-    
-    print("1. Initializing chess engines...")
-    enhanced_engine = EnhancedChessSuggester()
-    basic_engine = ChessSuggester()
-    print("Engines initialized successfully")
-    
-    print("\n2. Testing starting position analysis...")
+
+@pytest.fixture(scope="module", params=[ChessSuggester, EnhancedChessSuggester])
+def engine(request):
+    return request.param()
+
+
+def test_opening_analysis(engine):
     board = chess.Board()
-    
-    enhanced_analysis = enhanced_engine.get_move_suggestions(board)
-    basic_analysis = basic_engine.get_move_suggestions(board)
-    
-    print(f"Enhanced Engine Evaluation: {enhanced_analysis['current_evaluation']:.2f}")
-    print(f"Basic Engine Evaluation: {basic_analysis['current_evaluation']:.2f}")
-    print(f"Game Status: {enhanced_analysis['is_check']}")
-    print("Starting position analysis complete")
-    
-    print("\n3. Testing position after some moves...")
-    moves = ['e4', 'e5', 'Nf3', 'Nc6']
-    for move in moves:
-        board.push_san(move)
-    
-    enhanced_analysis = enhanced_engine.get_move_suggestions(board)
-    print(f"Position after {len(moves)} moves:")
-    print(f"FEN: {board.fen()}")
-    print(f"Evaluation: {enhanced_analysis['current_evaluation']:.2f}")
-    print(f"Top 3 moves:")
-    for i, move_data in enumerate(enhanced_analysis['suggested_moves'][:3]):
-        print(f"  {i+1}. {move_data['san']} (eval: {move_data['evaluation']:.2f})")
-    print("Move analysis complete")
-    
-    print("\n4. Testing checkmate position...")
-    checkmate_board = chess.Board("rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 1 3")
-    checkmate_analysis = enhanced_engine.get_move_suggestions(checkmate_board)
-    print(f"Checkmate position evaluation: {checkmate_analysis['current_evaluation']:.2f}")
-    print(f"Is checkmate: {checkmate_analysis['is_checkmate']}")
-    print("Checkmate analysis complete")
-    
-    print("\n5. Testing stalemate position...")
-    stalemate_board = chess.Board("k7/8/1K6/8/8/8/8/8 w - - 0 1")
-    stalemate_analysis = enhanced_engine.get_move_suggestions(stalemate_board)
-    print(f"Stalemate position evaluation: {stalemate_analysis['current_evaluation']:.2f}")
-    print(f"Is stalemate: {stalemate_analysis['is_stalemate']}")
-    print("Stalemate analysis complete")
-    
-    print("\n" + "=" * 50)
-    print("All analysis integration tests passed!")
-    print("\nThe chess game with real-time analysis is ready to use.")
-    print("Run 'python main.py' to start the game with analysis panel.")
+    for san in ("e4", "e5", "Nf3", "Nc6"):
+        board.push_san(san)
+    analysis = engine.get_move_suggestions(board)
+    assert isinstance(analysis["current_evaluation"], float)
+    assert len(analysis["suggested_moves"]) == 5
+    assert all(chess.Move.from_uci(m["move"]) in board.legal_moves for m in analysis["suggested_moves"])
+    assert analysis["is_check"] is False
 
-if __name__ == "__main__":
-    test_analysis_integration() 
+
+def test_checkmate_analysis(engine):
+    analysis = engine.get_move_suggestions(chess.Board(CHECKMATE))
+    assert analysis["is_checkmate"] is True
+    assert analysis["current_evaluation"] < -1000
+    assert analysis["suggested_moves"] == []
+
+
+def test_stalemate_analysis(engine):
+    analysis = engine.get_move_suggestions(chess.Board(STALEMATE))
+    assert analysis["is_stalemate"] is True
+    assert analysis["current_evaluation"] == 0.0
+    assert analysis["suggested_moves"] == []
+
+
+def test_enhanced_engine_falls_back_without_model(tmp_path):
+    engine = EnhancedChessSuggester(model_path=str(tmp_path / "missing.pkl"))
+    assert engine.use_model is False
+    assert engine.evaluate_position(chess.Board()) == 0.0

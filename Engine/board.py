@@ -51,7 +51,7 @@ class Board:
         return self.board.fen()
         
     def get_pgn(self) -> str:
-        return self.board.variation_san(self.move_history)
+        return self.board.root().variation_san(self.board.move_stack)
         
     def get_evaluation(self, depth: int = 15) -> float:
         return evaluate_position(self.board, depth)
