@@ -1,5 +1,6 @@
 import pathlib
 import sys
+import threading
 from typing import List, Optional, Tuple
 
 import chess
@@ -41,6 +42,9 @@ class ChessGame:
         self.move_history = []
         self.san_history = []
         self.analysis_data = None
+        self._analysis_generation = 0
+        self._analysis_lock = threading.Lock()
+        self.analysis_pending = False
         
         # Analysis panel dimensions
         self.analysis_panel_x = 720
@@ -96,12 +100,25 @@ class ChessGame:
         return "Draw"
 
     def update_analysis(self):
-        try:
-            self.analysis_data = self.enhanced_engine.get_move_suggestions(self.board)
-        except Exception as e:
-            print(f"Error updating analysis: {e}")
-            # Fallback to basic engine
-            self.analysis_data = self.basic_engine.get_move_suggestions(self.board)
+        """Run the engine on a worker thread so the render loop never blocks.
+        Results for a position that has since changed are discarded."""
+        self._analysis_generation += 1
+        generation = self._analysis_generation
+        snapshot = self.board.copy(stack=False)
+        self.analysis_pending = True
+
+        def work():
+            try:
+                result = self.enhanced_engine.get_move_suggestions(snapshot)
+            except Exception as e:
+                print(f"Error updating analysis: {e}")
+                result = self.basic_engine.get_move_suggestions(snapshot)
+            with self._analysis_lock:
+                if generation == self._analysis_generation:
+                    self.analysis_data = result
+                    self.analysis_pending = False
+
+        threading.Thread(target=work, daemon=True).start()
     
     def get_square_from_pos(self, pos: Tuple[int, int]) -> Optional[int]:
         x, y = pos
@@ -203,7 +220,10 @@ class ChessGame:
         radius = 12
 
         # Clamp and animate evaluation
-        target_eval = self.analysis_data['current_evaluation'] if self.analysis_data else 0
+        with self._analysis_lock:
+            analysis = self.analysis_data
+            pending = self.analysis_pending
+        target_eval = analysis['current_evaluation'] if analysis else 0
         target_eval = max(min(target_eval, 5), -5)
         # Smooth animation
         self.displayed_eval += (target_eval - self.displayed_eval) * self.eval_animation_speed
@@ -258,8 +278,12 @@ class ChessGame:
         self.screen.blit(b_label, (bar_x + bar_width + 8, bar_y + bar_height - 15))
         y_offset += bar_height + 30
 
+        if pending:
+            pending_text, _ = self.small_font.render('Analyzing...', fgcolor=(160, 160, 160))
+            self.screen.blit(pending_text, (bar_x + bar_width + 16, bar_y + bar_height + 6))
+
         # In-depth Analysis Information
-        if self.analysis_data:
+        if analysis:
             # Material imbalance
             white_material = sum([
                 len(self.board.pieces(pt, chess.WHITE)) * val
@@ -315,7 +339,7 @@ class ChessGame:
             y_offset += 28
 
             # Human-readable position assessment
-            eval_score = self.analysis_data['current_evaluation']
+            eval_score = analysis['current_evaluation']
             game_over = self.game_over_text()
             if game_over:
                 assessment = game_over
@@ -407,8 +431,10 @@ class ChessGame:
         return None
         
     def run(self):
+        clock = pygame.time.Clock()
         running = True
         while running:
+            clock.tick(60)
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     running = False

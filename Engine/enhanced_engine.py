@@ -1,6 +1,7 @@
 import pickle
 
 import chess
+import numpy as np
 
 from Engine.chess_suggester import ChessSuggester
 from Engine.features import extract_features  # noqa: F401  (re-exported for backwards compatibility)
@@ -25,26 +26,42 @@ class EnhancedChessSuggester(ChessSuggester):
         self.model = load_model(model_path)
         self.use_model = self.model is not None
     
+    MODEL_WEIGHT = 0.7
+
+    def _model_available(self):
+        return self.use_model and self.model is not None and hasattr(self.model, 'predict')
+
+    def _blend(self, model_eval, material_eval):
+        return self.MODEL_WEIGHT * float(model_eval) + (1 - self.MODEL_WEIGHT) * material_eval
+
     def evaluate_position(self, board):
-        if board.is_game_over():
-            if board.is_checkmate():
-                return -10000.0 if board.turn else 10000.0
-            return 0.0
-        
-        if self.use_model and self.model is not None and hasattr(self.model, 'predict'):
-            # Extract features and use the model
-            features = extract_features(board)
-            model_eval = self.model.predict([features])[0]
-            
-            # Combine with material evaluation (weighted average)
-            material_eval = super().evaluate_position(board)
-            combined_eval = 0.7 * model_eval + 0.3 * material_eval
-            
-            return combined_eval
-        else:
-            # Fall back to the original evaluation
+        if board.is_game_over() or not self._model_available():
             return super().evaluate_position(board)
-    
+        model_eval = self.model.predict(extract_features(board).reshape(1, -1))[0]
+        return self._blend(model_eval, super().evaluate_position(board))
+
+    def evaluate_positions(self, boards):
+        """One model.predict() call for every live position instead of one per
+        leaf; sklearn's per-call overhead otherwise dominates the search."""
+        if not self._model_available():
+            return super().evaluate_positions(boards)
+
+        scores = [None] * len(boards)
+        live_indices = []
+        for i, board in enumerate(boards):
+            if board.is_game_over():
+                scores[i] = super().evaluate_position(board)
+            else:
+                live_indices.append(i)
+
+        if live_indices:
+            features = np.vstack([extract_features(boards[i]) for i in live_indices])
+            predictions = self.model.predict(features)
+            for i, model_eval in zip(live_indices, predictions):
+                scores[i] = self._blend(model_eval, super().evaluate_position(boards[i]))
+        return scores
+
+
 if __name__ == "__main__":
     # Example usage
     board = chess.Board()
