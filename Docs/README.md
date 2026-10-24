@@ -58,8 +58,8 @@
 ## 📦 Installation
 
 ### Prerequisites
-- **Python 3.7+**
-- **Stockfish Chess Engine** (optional, for enhanced analysis)
+- **Python 3.11+** (3.13 supported)
+- **Stockfish** (optional; used by `Engine/evaluation.py`, the CLI, the Tkinter GUI and the FastAPI service when found on `PATH`, in `/opt/homebrew/bin`, `/usr/local/bin`, or via `STOCKFISH_PATH`). `brew install stockfish` on macOS.
 
 ### Quick Setup
 
@@ -69,21 +69,23 @@
    cd Chess-Engine
    ```
 
-2. **Install dependencies**
+2. **Create a virtual environment and install dependencies**
    ```bash
+   python3 -m venv venv
+   source venv/bin/activate
+   pip install -r requirements-dev.txt   # everything: desktop UIs, API, ML, tests
+   # or, for just the web app:
    pip install -r requirements.txt
    ```
 
-3. **Train the ML model** (optional)
+3. **Train the ML model** (optional — a trained model is already committed)
    ```bash
    python Scripts/train_engine.py
    ```
 
 4. **Run the web application** (recommended)
    ```bash
-   cd UI/chesswebapp
-   source ../../venv/bin/activate
-   python run_webapp.py
+   python app.py            # http://127.0.0.1:5001
    ```
 
 ---
@@ -91,12 +93,13 @@
 ## 🎯 Usage
 
 ### 🌐 Web Application (Recommended)
-Launch the modern web interface:
+Launch the web interface from the repo root:
 ```bash
-cd UI/chesswebapp
-source ../../venv/bin/activate
-python run_webapp.py
+python app.py                        # http://127.0.0.1:5001
+FLASK_DEBUG=1 python app.py          # with auto-reload
+python UI/chesswebapp/run_webapp.py  # same, and opens your browser
 ```
+The server is stateless: the browser holds the game and sends a FEN with every request, so several tabs can play independently.
 
 **Features:**
 - **Beautiful Dark Theme**: Ghana flag-inspired design with red, gold, and green accents
@@ -120,10 +123,16 @@ python main.py
 - Move history with last move highlighting
 - Keyboard shortcuts (R: Reset, U: Undo)
 
+### 🖼️ Graphical Interface (Tkinter)
+```bash
+python -m UI.gui
+```
+Requires a Python build with `tkinter` (`brew install python-tk@3.13` on macOS Homebrew).
+
 ### 💻 Command Line Interface
 For quick analysis and scripting:
 ```bash
-python UI/cli.py
+python -m UI.cli
 ```
 
 **Features:**
@@ -133,15 +142,16 @@ python UI/cli.py
 - Game state tracking
 
 ### 🌐 Web API
-Start the FastAPI server:
+Start the FastAPI server from the repo root:
 ```bash
-python API/server.py
+uvicorn API.server:app --reload      # http://127.0.0.1:8000/docs
 ```
 
-**Available Endpoints:**
-- `POST /move` - Make a move
-- `GET /state` - Get current game state
-- `GET /best-move` - Get engine's best move
+**Available Endpoints** (prefix `/api/v1`):
+- `POST /move` - Make a move (`{"move": "e2e4"}`, promotions as `e7e8q`)
+- `POST /undo` - Undo the last move
+- `GET /state` - Current FEN, turn, evaluation, legal moves
+- `GET /best-move?depth=15` - Engine's best move
 - `POST /reset` - Reset the game
 
 ### 🔬 Advanced Analysis
@@ -394,29 +404,27 @@ sequenceDiagram
 
 ```
 Chess-Engine/
-├── 🌐 UI/chesswebapp/         # Modern web application
-│   ├── run_webapp.py         # Web app launcher
-│   ├── templates/index.html  # Main web interface
-│   └── static/style.css      # Ghana flag-inspired styling
-├── 🎮 main.py                # Main Pygame GUI application
-├── 🧠 Engine/                # Core chess engine components
-│   ├── enhanced_engine.py    # ML-enhanced chess engine
-│   ├── chess_suggester.py    # Move suggestion engine
-│   ├── evaluation.py         # Position evaluation
-│   └── board.py             # Board representation
-├── 🌐 API/                   # Web API components
-│   ├── server.py            # FastAPI server
-│   └── endpoints.py         # API endpoints
-├── 💻 UI/                    # User interfaces
-│   └── cli.py               # Command line interface
-├── 🔬 Scripts/               # Analysis and training tools
-│   ├── train_engine.py      # ML model training
-│   ├── analyze_training_data.py
-│   └── visualize_analysis.py
-├── 📊 Data/                  # Training data and models
-│   ├── trained_model.pkl    # Trained ML model
-│   └── training_data.csv    # Training dataset
-└── 🧪 Tests/                 # Test suite
+├── app.py                    # Flask web app (entry point for the web UI and Vercel)
+├── wsgi.py / vercel.json     # Vercel deployment
+├── main.py                   # Pygame desktop UI with live analysis panel
+├── requirements.txt          # Runtime deps for the web app
+├── requirements-dev.txt      # Desktop UIs, API, ML pipeline, tests
+├── pytest.ini / conftest.py  # Test configuration
+├── Engine/                   # Core engine
+│   ├── chess_suggester.py    # Material eval + 2-ply move ranking
+│   ├── enhanced_engine.py    # Adds the trained regression model
+│   ├── features.py           # Feature extraction shared with training
+│   ├── evaluation.py         # Stockfish (if available) / material evaluation
+│   └── board.py              # Board wrapper used by the API and UIs
+├── API/                      # FastAPI service (uvicorn API.server:app)
+├── UI/
+│   ├── cli.py                # Command-line interface
+│   ├── gui.py                # Tkinter interface
+│   └── chesswebapp/          # Flask templates and static assets
+├── Scripts/                  # Data generation, training, analysis
+├── Data/                     # training_data.csv, trained_model.pkl, plots/
+├── Tests/                    # pytest suite
+└── Docs/
 ```
 
 ---
@@ -503,17 +511,12 @@ graph LR
     style ML fill:#f3e5f5
 ```
 
-Run the comprehensive test suite:
+Run the test suite from the repo root:
 ```bash
-# Run all tests
-pytest Tests/
-
-# Run specific test modules
-pytest Tests/test_engine.py
-pytest Tests/test_api.py
-pytest Tests/test_webapp.py
-pytest Tests/test_blunder.py
+python -m pytest                      # all tests (~5s)
+python -m pytest Tests/test_api.py    # one module
 ```
+Stockfish-dependent tests are skipped automatically when it isn't installed.
 
 ---
 
@@ -628,20 +631,14 @@ We welcome contributions! Please see our contributing guidelines:
 
 ### Development Setup
 ```bash
-# Install development dependencies
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
 
-# Run linting
-black .
-pylint Engine/ Tests/ Scripts/
-
-# Run tests
-pytest Tests/
-
-# Start web development server
-cd UI/chesswebapp
-python run_webapp.py
+python -m pyflakes Engine Scripts API UI Tests app.py main.py   # lint
+python -m pytest                                                # tests
+FLASK_DEBUG=1 python app.py                                     # web dev server
 ```
+
+Branches follow `fix/…`, `feat/…`, `refactor/…`, `docs/…`; open a PR against `main` and reference the issue it closes.
 
 ---
 
