@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: requirements*.txt
+
+      - name: Install Stockfish
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq stockfish
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Lint
+        run: python -m pyflakes Engine Scripts API UI Tests app.py main.py conftest.py
+
+      - name: Test
+        env:
+          SDL_VIDEODRIVER: dummy
+          SDL_AUDIODRIVER: dummy
+          MPLBACKEND: Agg
+        run: python -m pytest
+
+  minimal-runtime:
+    # The web app must work with only requirements.txt (what Vercel installs).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt
+      - name: Smoke-test the Flask app
+        run: |
+          python - <<'EOF'
+          from app import app, chess_suggester
+          client = app.test_client()
+          assert client.get("/").status_code == 200
+          body = client.post("/suggest", json={}).get_json()
+          assert len(body["suggested_moves"]) == 5, body
+          print("minimal runtime OK, engine:", type(chess_suggester).__name__)
+          EOF

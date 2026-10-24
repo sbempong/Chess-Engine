@@ -107,6 +107,10 @@ class PositionEvaluator:
         return score / 100.0
 
     def evaluate_position(self, board: chess.Board, depth: int = 15) -> float:
+        # Mate and decided draws are definitive; don't ask the engine (older
+        # Stockfish builds return small non-zero scores for dead draws).
+        if board.is_game_over():
+            return self.material_evaluation(board)
         engine = self._ensure_engine()
         if engine is None:
             return self.material_evaluation(board)
