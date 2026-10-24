@@ -1,7 +1,18 @@
 import chess
 
+
 class ChessSuggester:
-    def __init__(self):
+    """Material-based move suggester.
+
+    All evaluations are from White's perspective: positive favours White,
+    negative favours Black. Move ranking takes the side to move into account,
+    so the best move for the mover is always first regardless of colour.
+    """
+
+    suggestion_comment = "Heuristic evaluation"
+
+    def __init__(self, search_depth=2):
+        self.search_depth = search_depth
         self.material_values = {
             chess.PAWN: 1.0,
             chess.KNIGHT: 3.0,
@@ -10,13 +21,13 @@ class ChessSuggester:
             chess.QUEEN: 9.0,
             chess.KING: 100.0
         }
-    
+
     def evaluate_position(self, board):
         if board.is_game_over():
             if board.is_checkmate():
                 return -10000.0 if board.turn else 10000.0
             return 0.0
-        
+
         score = 0.0
         for square in chess.SQUARES:
             piece = board.piece_at(square)
@@ -28,25 +39,37 @@ class ChessSuggester:
             else:
                 score -= value
         return score
-    
-    def suggest_moves(self, board):
+
+    def _score_after_move(self, board, move, depth):
+        """White-perspective score of the position reached after `move`,
+        assuming the opponent then picks the reply that is worst for us."""
+        board.push(move)
+        try:
+            if depth <= 1 or board.is_game_over():
+                return self.evaluate_position(board)
+            replies = [self._score_after_move(board, reply, depth - 1)
+                       for reply in board.legal_moves]
+            return max(replies) if board.turn == chess.WHITE else min(replies)
+        finally:
+            board.pop()
+
+    def suggest_moves(self, board, limit=5):
         if board.is_game_over():
             return []
-        
+
+        mover_sign = 1 if board.turn == chess.WHITE else -1
         moves = []
         for move in board.legal_moves:
-            board.push(move)
-            eval_score = -self.evaluate_position(board)
-            board.pop()
-            moves.append((move, eval_score, "Heuristic evaluation"))
-        
-        moves.sort(key=lambda x: x[1], reverse=True)
-        return moves[:5]
-    
+            score = self._score_after_move(board, move, self.search_depth)
+            moves.append((move, score, self.suggestion_comment))
+
+        moves.sort(key=lambda item: mover_sign * item[1], reverse=True)
+        return moves[:limit]
+
     def get_move_suggestions(self, board):
         current_eval = self.evaluate_position(board)
         move_suggestions = self.suggest_moves(board)
-        
+
         formatted_suggestions = []
         for move, eval_score, comment in move_suggestions:
             formatted_suggestions.append({
@@ -55,7 +78,7 @@ class ChessSuggester:
                 "evaluation": eval_score,
                 "comment": comment
             })
-        
+
         return {
             "current_evaluation": current_eval,
             "is_check": board.is_check(),
@@ -65,17 +88,18 @@ class ChessSuggester:
             "suggested_moves": formatted_suggestions
         }
 
+
 if __name__ == "__main__":
     board = chess.Board()
     suggester = ChessSuggester()
     suggestions = suggester.get_move_suggestions(board)
-    
+
     print(f"Current evaluation: {suggestions['current_evaluation']:.2f}")
     print(f"Check: {suggestions['is_check']}")
     print(f"Checkmate: {suggestions['is_checkmate']}")
     print(f"Stalemate: {suggestions['is_stalemate']}")
     print(f"Insufficient material: {suggestions['is_insufficient_material']}")
-    
+
     print("\nSuggested moves:")
     for i, move in enumerate(suggestions['suggested_moves'], 1):
-        print(f"{i}. {move['san']} (evaluation: {move['evaluation']:.2f}) - {move['comment']}") 
+        print(f"{i}. {move['san']} (evaluation: {move['evaluation']:.2f}) - {move['comment']}")
