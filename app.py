@@ -1,101 +1,117 @@
-from flask import Flask, render_template, request, jsonify
-import chess
 import os
-import sys
+
+import chess
+from flask import Flask, jsonify, render_template, request
+
 from Engine.chess_suggester import ChessSuggester
 
-sys.path.append(os.path.join(os.path.dirname(__file__), 'Engine'))
+try:
+    from Engine.enhanced_engine import EnhancedChessSuggester
+except ImportError:  # numpy / scikit-learn not installed (e.g. minimal deploy)
+    EnhancedChessSuggester = None
 
-app = Flask(__name__, 
-           static_folder='UI/chesswebapp/static',
-           template_folder='UI/chesswebapp/templates')
+app = Flask(__name__,
+            static_folder='UI/chesswebapp/static',
+            template_folder='UI/chesswebapp/templates')
 
-# Initialize chess suggester (stateless, safe to use globally)
-# Note: Each endpoint creates its own board instance from FEN to avoid state issues
-chess_suggester = ChessSuggester()
 
-# CORS headers for frontend
+def build_suggester():
+    if EnhancedChessSuggester is not None:
+        enhanced = EnhancedChessSuggester()
+        if enhanced.use_model:
+            return enhanced
+    return ChessSuggester()
+
+
+# Stateless: every request carries its own FEN, so one shared suggester is safe.
+chess_suggester = build_suggester()
+
+
 @app.after_request
 def after_request(response):
     response.headers['Access-Control-Allow-Origin'] = '*'
     response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
-    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
+    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
     return response
+
+
+def board_from_request(payload):
+    fen = payload.get('fen') or chess.STARTING_FEN
+    try:
+        return chess.Board(fen), None
+    except ValueError as exc:
+        return None, (jsonify({'status': 'error', 'message': f'Invalid FEN: {exc}'}), 400)
+
+
+def position_payload(board):
+    return {
+        'fen': board.fen(),
+        'is_check': board.is_check(),
+        'is_checkmate': board.is_checkmate(),
+        'is_stalemate': board.is_stalemate(),
+        'is_insufficient_material': board.is_insufficient_material(),
+        'is_game_over': board.is_game_over(),
+        'turn': 'white' if board.turn else 'black',
+    }
+
 
 @app.route('/')
 def index():
     return render_template('index.html')
 
-@app.route('/test-static')
-def test_static():
-    static_path = os.path.join(os.getcwd(), 'UI', 'chesswebapp', 'static')
-    return f"Static folder path: {static_path}<br>Exists: {os.path.exists(static_path)}"
 
 @app.route('/move', methods=['POST'])
 def move():
-    try:
-        if not request.is_json or request.json is None:
-            return jsonify({'status': 'error', 'message': 'Invalid or missing JSON'}), 400
-        
-        move_uci = request.json.get('move')
-        fen = request.json.get('fen', 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1')
-        
-        if not move_uci:
-            return jsonify({'status': 'error', 'message': 'No move provided'}), 400
-            
-        temp_board = chess.Board(fen)
-        
-        if len(move_uci) != 4:
-            return jsonify({'status': 'error', 'message': 'Invalid move format'}), 400
-        
-        move = chess.Move.from_uci(move_uci)
+    payload = request.get_json(silent=True)
+    if payload is None:
+        return jsonify({'status': 'error', 'message': 'Invalid or missing JSON'}), 400
 
-        if move in temp_board.legal_moves:
-            temp_board.push(move)
-            return jsonify({'status': 'ok', 'fen': temp_board.fen()})
-        else:
-            return jsonify({'status': 'illegal'})
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+    move_uci = payload.get('move')
+    if not move_uci:
+        return jsonify({'status': 'error', 'message': 'No move provided'}), 400
+
+    board, error = board_from_request(payload)
+    if error:
+        return error
+
+    try:
+        move = chess.Move.from_uci(move_uci)
+    except ValueError:
+        return jsonify({'status': 'error', 'message': 'Invalid move format'}), 400
+
+    if move not in board.legal_moves:
+        return jsonify({'status': 'illegal', 'fen': board.fen()})
+
+    board.push(move)
+    return jsonify({'status': 'ok', **position_payload(board)})
+
 
 @app.route('/reset', methods=['POST'])
 def reset():
-    try:
-        temp_board = chess.Board()
-        return jsonify({'status': 'reset', 'fen': temp_board.fen()})
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+    return jsonify({'status': 'reset', **position_payload(chess.Board())})
+
 
 @app.route('/suggest', methods=['POST'])
 def suggest_moves():
-    try:
-        if not request.is_json or request.json is None:
-            return jsonify({'status': 'error', 'message': 'Invalid or missing JSON'}), 400
-        
-        fen = request.json.get('fen', 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1')
-        
-        temp_board = chess.Board(fen)
-        
-        suggestions = chess_suggester.get_move_suggestions(temp_board)
-        
-        return jsonify(suggestions)
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+    payload = request.get_json(silent=True)
+    if payload is None:
+        return jsonify({'status': 'error', 'message': 'Invalid or missing JSON'}), 400
+
+    board, error = board_from_request(payload)
+    if error:
+        return error
+
+    return jsonify(chess_suggester.get_move_suggestions(board))
+
 
 @app.route('/position', methods=['GET'])
 def get_position():
-    try:
-        temp_board = chess.Board()
-        return jsonify({
-            'fen': temp_board.fen(),
-            'is_check': temp_board.is_check(),
-            'is_checkmate': temp_board.is_checkmate(),
-            'is_stalemate': temp_board.is_stalemate(),
-            'is_insufficient_material': temp_board.is_insufficient_material(),
-            'turn': 'white' if temp_board.turn else 'black'
-        })
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+    board, error = board_from_request(request.args)
+    if error:
+        return error
+    return jsonify(position_payload(board))
+
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5001, threaded=True)
+    debug = os.environ.get('FLASK_DEBUG', '0') == '1'
+    app.run(debug=debug, host='127.0.0.1', port=int(os.environ.get('PORT', 5001)), threaded=True)
