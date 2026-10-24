@@ -40,29 +40,48 @@ class ChessSuggester:
                 score -= value
         return score
 
-    def _score_after_move(self, board, move, depth):
-        """White-perspective score of the position reached after `move`,
-        assuming the opponent then picks the reply that is worst for us."""
-        board.push(move)
-        try:
-            if depth <= 1 or board.is_game_over():
-                return self.evaluate_position(board)
-            replies = [self._score_after_move(board, reply, depth - 1)
-                       for reply in board.legal_moves]
-            return max(replies) if board.turn == chess.WHITE else min(replies)
-        finally:
+    def evaluate_positions(self, boards):
+        """Evaluate many positions at once. Subclasses with a batch-friendly
+        evaluator (e.g. an ML model) override this to avoid per-leaf overhead."""
+        return [self.evaluate_position(board) for board in boards]
+
+    def _collect_leaves(self, board, depth, leaves):
+        """Build the minimax tree below `board`, appending leaf positions to
+        `leaves`. Returns either ('leaf', index) or ('node', turn, children)."""
+        if depth <= 0 or board.is_game_over():
+            leaves.append(board.copy(stack=False))
+            return ('leaf', len(leaves) - 1)
+        children = []
+        for move in board.legal_moves:
+            board.push(move)
+            children.append(self._collect_leaves(board, depth - 1, leaves))
             board.pop()
+        return ('node', board.turn, children)
+
+    @staticmethod
+    def _resolve(node, scores):
+        """Minimax over a tree from _collect_leaves using White-perspective
+        leaf scores: White maximises, Black minimises."""
+        if node[0] == 'leaf':
+            return scores[node[1]]
+        _, turn, children = node
+        values = [ChessSuggester._resolve(child, scores) for child in children]
+        return max(values) if turn == chess.WHITE else min(values)
 
     def suggest_moves(self, board, limit=5):
         if board.is_game_over():
             return []
 
-        mover_sign = 1 if board.turn == chess.WHITE else -1
-        moves = []
+        leaves = []
+        roots = []
         for move in board.legal_moves:
-            score = self._score_after_move(board, move, self.search_depth)
-            moves.append((move, score, self.suggestion_comment))
+            board.push(move)
+            roots.append((move, self._collect_leaves(board, self.search_depth - 1, leaves)))
+            board.pop()
 
+        scores = self.evaluate_positions(leaves)
+        mover_sign = 1 if board.turn == chess.WHITE else -1
+        moves = [(move, self._resolve(node, scores), self.suggestion_comment) for move, node in roots]
         moves.sort(key=lambda item: mover_sign * item[1], reverse=True)
         return moves[:limit]
 
