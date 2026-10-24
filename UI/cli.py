@@ -1,7 +1,7 @@
+from typing import Optional
+
 import chess
-import sys
-from typing import Optional, List
-from Engine.board import Board
+
 from Engine.evaluation import evaluate_position
 
 class ChessCLI:

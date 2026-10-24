@@ -1,13 +1,16 @@
 """
 Chess Engine UI Package
 
-This package provides user interface implementations, including:
-- Command-line interface (CLI)
-- Graphical user interface (GUI)
-- Web-based interface
+- UI.cli: command-line interface (no extra dependencies)
+- UI.gui: Tkinter GUI (requires a Python build with tkinter)
+- UI/chesswebapp: Flask web interface, served by app.py at the repo root
 """
 
 from .cli import ChessCLI
-from .gui import ChessGUI
 
-__all__ = ['ChessCLI', 'ChessGUI'] 
+try:
+    from .gui import ChessGUI
+except ImportError:  # tkinter not available in this Python build
+    ChessGUI = None
+
+__all__ = ['ChessCLI', 'ChessGUI']

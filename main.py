@@ -1,15 +1,15 @@
+import pathlib
+import sys
+from typing import List, Optional, Tuple
+
 import chess
 import pygame
 from pygame._freetype import Font as FreeTypeFont, init as freetype_init
-import sys
-import os
-from typing import Optional, List, Tuple
-from PIL import Image
-import pathlib
-from Engine.enhanced_engine import EnhancedChessSuggester
-from Engine.chess_suggester import ChessSuggester
 
-sys.path.append(os.path.join(os.path.dirname(__file__), 'Engine'))
+from Engine.chess_suggester import ChessSuggester
+from Engine.enhanced_engine import EnhancedChessSuggester
+
+MAX_VISIBLE_MOVE_PAIRS = 10
 
 class ChessGame:
     def __init__(self):
@@ -39,6 +39,7 @@ class ChessGame:
         self.selected_square = None
         self.valid_moves = []
         self.move_history = []
+        self.san_history = []
         self.analysis_data = None
         
         # Analysis panel dimensions
@@ -62,7 +63,6 @@ class ChessGame:
         for symbol, filename in piece_image_map.items():
             try:
                 image_path = (base_path / filename).resolve()
-                print(f"Trying to load: {image_path}")  # Debug print
                 image = pygame.image.load(str(image_path))
                 image = pygame.transform.smoothscale(image, (self.square_size, self.square_size))
                 self.pieces[symbol] = image
@@ -70,6 +70,31 @@ class ChessGame:
                 print(f"Error loading image {symbol} from {image_path}: {e}")
                 self.pieces[symbol] = pygame.Surface((self.square_size, self.square_size), pygame.SRCALPHA)
     
+    @staticmethod
+    def mobility(board: chess.Board, color: chess.Color) -> int:
+        """Number of legal moves `color` would have if it were their turn."""
+        if board.turn == color:
+            return board.legal_moves.count()
+        probe = board.copy(stack=False)
+        probe.turn = color
+        probe.ep_square = None
+        return probe.legal_moves.count()
+
+    def game_over_text(self) -> Optional[str]:
+        if not self.board.is_game_over():
+            return None
+        if self.board.is_checkmate():
+            return "Checkmate - " + ("Black" if self.board.turn else "White") + " wins"
+        if self.board.is_stalemate():
+            return "Draw - stalemate"
+        if self.board.is_insufficient_material():
+            return "Draw - insufficient material"
+        if self.board.is_fifty_moves():
+            return "Draw - fifty-move rule"
+        if self.board.is_repetition():
+            return "Draw - repetition"
+        return "Draw"
+
     def update_analysis(self):
         try:
             self.analysis_data = self.enhanced_engine.get_move_suggestions(self.board)
@@ -185,7 +210,6 @@ class ChessGame:
         capped_eval = self.displayed_eval
         white_ratio = (capped_eval + 5) / 10  # 0 (all black) to 1 (all white)
         white_height = int(bar_height * white_ratio)
-        black_height = bar_height - white_height
 
         # Create a surface for the bar (with per-pixel alpha)
         bar_surface = pygame.Surface((bar_width, bar_height), pygame.SRCALPHA)
@@ -252,8 +276,8 @@ class ChessGame:
             y_offset += 28
 
             # Mobility
-            white_mobility = len([m for m in self.board.legal_moves if self.board.turn]) if self.board.turn else len([m for m in self.board.legal_moves if not self.board.turn])
-            black_mobility = len([m for m in self.board.legal_moves if not self.board.turn]) if self.board.turn else len([m for m in self.board.legal_moves if self.board.turn])
+            white_mobility = self.mobility(self.board, chess.WHITE)
+            black_mobility = self.mobility(self.board, chess.BLACK)
             mobility_text = f"Mobility: W {white_mobility} / B {black_mobility}"
             mobility_render, _ = self.font.render(mobility_text, fgcolor=(200, 200, 200))
             self.screen.blit(mobility_render, (panel_x + 20, y_offset))
@@ -292,7 +316,10 @@ class ChessGame:
 
             # Human-readable position assessment
             eval_score = self.analysis_data['current_evaluation']
-            if abs(eval_score) > 3.0:
+            game_over = self.game_over_text()
+            if game_over:
+                assessment = game_over
+            elif abs(eval_score) > 3.0:
                 assessment = "White is winning" if eval_score > 0 else "Black is winning"
             elif abs(eval_score) > 1.0:
                 assessment = "White is better" if eval_score > 0 else "Black is better"
@@ -303,32 +330,40 @@ class ChessGame:
             self.screen.blit(assessment_render, (panel_x + 20, y_offset))
             y_offset += 32
 
-        # Draw move list header
-        header, _ = self.font.render(' ', fgcolor=(255, 255, 255))
-        self.screen.blit(header, (panel_x + 30, y_offset))
-        y_offset += 10
-
-        # Draw move list in two columns
-        moves = self.move_history
+        # Move list in two columns, showing only the most recent pairs
+        pairs = [(self.san_history[i], self.san_history[i + 1] if i + 1 < len(self.san_history) else '')
+                 for i in range(0, len(self.san_history), 2)]
+        first_pair = max(0, len(pairs) - MAX_VISIBLE_MOVE_PAIRS)
         col1_x = panel_x + 30
         col2_x = panel_x + panel_width // 2
         row_height = 32
-        for i in range(0, len(moves), 2):
-            move_num = (i // 2) + 1
-            move1 = moves[i].uci() if i < len(moves) else ''
-            move2 = moves[i+1].uci() if i+1 < len(moves) else ''
-            # Highlight last move
-            highlight = (i == len(moves)-2) or (i+1 == len(moves)-1)
-            font1 = self.large_font if highlight and i == len(moves)-2 else self.font
-            font2 = self.large_font if highlight and i+1 == len(moves)-1 else self.font
-            move_num_text, _ = self.small_font.render(f'{move_num}.', fgcolor=(180, 180, 180))
-            self.screen.blit(move_num_text, (col1_x - 25, y_offset + (i//2)*row_height))
+        y_offset += 10
+        for row, pair_idx in enumerate(range(first_pair, len(pairs))):
+            move1, move2 = pairs[pair_idx]
+            is_last_pair = pair_idx == len(pairs) - 1
+            font1 = self.large_font if is_last_pair and not move2 else self.font
+            font2 = self.large_font if is_last_pair and move2 else self.font
+            y = y_offset + row * row_height
+            move_num_text, _ = self.small_font.render(f'{pair_idx + 1}.', fgcolor=(180, 180, 180))
+            self.screen.blit(move_num_text, (col1_x - 25, y))
             move1_text, _ = font1.render(move1, fgcolor=(255, 255, 255))
-            self.screen.blit(move1_text, (col1_x, y_offset + (i//2)*row_height))
-            move2_text, _ = font2.render(move2, fgcolor=(255, 255, 255))
-            self.screen.blit(move2_text, (col2_x, y_offset + (i//2)*row_height))
+            self.screen.blit(move1_text, (col1_x, y))
+            if move2:
+                move2_text, _ = font2.render(move2, fgcolor=(255, 255, 255))
+                self.screen.blit(move2_text, (col2_x, y))
+
+        # Game-over banner across the board
+        banner = self.game_over_text()
+        if banner:
+            overlay = pygame.Surface((self.square_size * 8, 60), pygame.SRCALPHA)
+            overlay.fill((0, 0, 0, 170))
+            self.screen.blit(overlay, (0, self.square_size * 4 - 30))
+            text, _ = self.large_font.render(banner + "  (R to restart)", fgcolor=(255, 230, 120))
+            self.screen.blit(text, text.get_rect(center=(self.square_size * 4, self.square_size * 4)))
 
     def handle_click(self, pos: tuple[int, int]) -> Optional[chess.Move]:
+        if self.board.is_game_over():
+            return None
         square = self.get_square_from_pos(pos)
         if square is None:
             return None
@@ -339,6 +374,7 @@ class ChessGame:
             for move in self.valid_moves:
                 if move.to_square == square:
                     # Make the move
+                    self.san_history.append(self.board.san(move))
                     self.board.push(move)
                     self.move_history.append(move)
                     
@@ -384,11 +420,13 @@ class ChessGame:
                         self.selected_square = None
                         self.valid_moves = []
                         self.move_history = []
+                        self.san_history = []
                         self.update_analysis()
                     elif event.key == pygame.K_u:  # Undo move with 'U' key
                         if self.move_history:
                             self.board.pop()
                             self.move_history.pop()
+                            self.san_history.pop()
                             self.selected_square = None
                             self.valid_moves = []
                             self.update_analysis()
